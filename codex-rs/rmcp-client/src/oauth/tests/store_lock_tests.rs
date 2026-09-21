@@ -6,6 +6,7 @@ use std::time::Instant;
 use anyhow::Context;
 use anyhow::Result;
 use codex_config::types::AuthKeyringBackendKind;
+#[cfg(not(target_env = "ohos"))]
 use codex_keyring_store::KeyringStore;
 use codex_keyring_store::tests::MockKeyringStore;
 use oauth2::AccessToken;
@@ -34,6 +35,7 @@ use crate::oauth::WrappedOAuthTokenResponse;
 use crate::oauth::fallback_file_path;
 use crate::oauth::load_oauth_tokens_from_file;
 use crate::oauth::load_oauth_tokens_from_keyring;
+#[cfg(not(target_env = "ohos"))]
 use crate::oauth::resolve_oauth_tokens_from_store_policy;
 use crate::oauth::save_oauth_tokens_to_file;
 use crate::oauth::save_oauth_tokens_to_file_with_lock_held;
@@ -142,6 +144,7 @@ fn file_credentials_keep_repeated_local_prefixes_isolated() -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(target_env = "ohos"))]
 #[test]
 fn legacy_rmcp_oauth_keyring_credentials_remain_readable() -> Result<()> {
     let _env = TempCodexHome::new();
@@ -289,6 +292,7 @@ fn auto_save_secrets_lock_failure_does_not_fall_back_to_file() -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(target_env = "ohos"))]
 #[test]
 fn auto_load_secrets_lock_failure_does_not_fall_back_to_file() -> Result<()> {
     let env = TempCodexHome::new();
@@ -373,10 +377,17 @@ fn oauth_credential_probes_skip_contended_file_and_secrets_stores() -> Result<()
     assert!(!refreshed.store_was_contended());
 
     let _lock = OAuthStoreLock::acquire_for_write(OAuthStore::Secrets)?;
+    #[cfg(not(target_env = "ohos"))]
     assert_eq!(
         probe(auto, secrets)?,
         None,
         "a locked Secrets authority must not fall back to the stale File entry",
+    );
+    #[cfg(target_env = "ohos")]
+    assert_eq!(
+        probe(auto, secrets)?,
+        Some(snapshot),
+        "OpenHarmony Auto uses File even when the unsupported Secrets store is locked",
     );
     Ok(())
 }

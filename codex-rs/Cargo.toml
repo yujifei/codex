@@ -600,6 +600,11 @@ inherits = "test"
 opt-level = 0
 
 [patch.crates-io]
+# OHOS libc has qsort but not GNU qsort_r; retain zstd's portable fallback.
+zstd-sys = { path = "vendor/zstd-sys" }
+# OHOS cmsghdr has musl's 32-bit cmsg_len field.
+nix = { path = "vendor/nix" }
+nix-0-28 = { package = "nix", path = "vendor/nix-0.28" }
 # Uncomment to debug local changes.
 # ratatui = { path = "../../ratatui" }
 crossterm = { git = "https://github.com/openai-oss-forks/crossterm", rev = "45fecb9508105988f42fe6ff0441783ed3717f92" }

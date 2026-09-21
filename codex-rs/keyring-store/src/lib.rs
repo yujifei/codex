@@ -48,10 +48,27 @@ pub trait KeyringStore: Debug + Send + Sync {
 #[derive(Debug, Clone, Copy)]
 pub struct DefaultKeyringStore;
 
+#[cfg(not(target_env = "ohos"))]
+fn keyring_entry(service: &str, account: &str) -> Result<Entry, CredentialStoreError> {
+    Entry::new(service, account).map_err(CredentialStoreError::new)
+}
+
+#[cfg(target_env = "ohos")]
+fn keyring_entry(_service: &str, _account: &str) -> Result<Entry, CredentialStoreError> {
+    // Without a supported backend, keyring defaults to an in-memory mock. Report
+    // the missing backend so callers can use their persistent file fallback.
+    Err(CredentialStoreError::new(KeyringError::PlatformFailure(
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "native credential storage is unsupported on OpenHarmony",
+        )),
+    )))
+}
+
 impl KeyringStore for DefaultKeyringStore {
     fn load(&self, service: &str, account: &str) -> Result<Option<String>, CredentialStoreError> {
         trace!("keyring.load start, service={service}, account={account}");
-        let entry = Entry::new(service, account).map_err(CredentialStoreError::new)?;
+        let entry = keyring_entry(service, account)?;
         match entry.get_password() {
             Ok(password) => {
                 trace!("keyring.load success, service={service}, account={account}");
@@ -73,7 +90,7 @@ impl KeyringStore for DefaultKeyringStore {
             "keyring.save start, service={service}, account={account}, value_len={}",
             value.len()
         );
-        let entry = Entry::new(service, account).map_err(CredentialStoreError::new)?;
+        let entry = keyring_entry(service, account)?;
         match entry.set_password(value) {
             Ok(()) => {
                 trace!("keyring.save success, service={service}, account={account}");
@@ -88,7 +105,7 @@ impl KeyringStore for DefaultKeyringStore {
 
     fn delete(&self, service: &str, account: &str) -> Result<bool, CredentialStoreError> {
         trace!("keyring.delete start, service={service}, account={account}");
-        let entry = Entry::new(service, account).map_err(CredentialStoreError::new)?;
+        let entry = keyring_entry(service, account)?;
         match entry.delete_credential() {
             Ok(()) => {
                 trace!("keyring.delete success, service={service}, account={account}");

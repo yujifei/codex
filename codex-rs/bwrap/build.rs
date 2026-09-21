@@ -49,6 +49,7 @@ fn try_build_bwrap() -> Result<(), String> {
     .map_err(|err| format!("failed to write {}: {err}", config_h.display()))?;
 
     let mut build = cc::Build::new();
+    let is_ohos = env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("ohos");
     build
         .file(src_dir.join("bubblewrap.c"))
         .file(src_dir.join("bind-mount.c"))
@@ -59,10 +60,22 @@ fn try_build_bwrap() -> Result<(), String> {
         .define("_GNU_SOURCE", None)
         // Rename `main` so the Rust wrapper can expose the Cargo-built binary.
         .define("main", Some("bwrap_main"));
+    if is_ohos {
+        // The OHOS libc has allocating getcwd, but no GNU get_current_dir_name.
+        // This resolves symlinks instead of preserving a matching logical PWD;
+        // bubblewrap uses it to restore the directory after changing roots.
+        build.define("get_current_dir_name()", Some("getcwd(NULL, 0)"));
+    }
     for include_path in libcap.include_paths {
-        // Use -idirafter so target sysroot headers win (musl cross builds),
-        // while still allowing libcap headers from the host toolchain.
-        build.flag(format!("-idirafter{}", include_path.display()));
+        if is_ohos {
+            // OHOS has a syscall-only sys/capability.h. The cross-built
+            // libcap development header supplies cap_from_name and cap_value_t.
+            build.include(include_path);
+        } else {
+            // Use -idirafter so target sysroot headers win (musl cross builds),
+            // while still allowing libcap headers from the host toolchain.
+            build.flag(format!("-idirafter{}", include_path.display()));
+        }
     }
 
     build.compile("standalone_bwrap");

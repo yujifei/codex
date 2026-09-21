@@ -20,6 +20,7 @@ use super::load_oauth_tokens_from_file;
 use super::load_oauth_tokens_from_file_with_lock_held;
 use super::load_oauth_tokens_from_keyring;
 use super::load_oauth_tokens_from_secrets_keyring_with_lock_held;
+use super::platform_oauth_store_mode;
 use super::save_oauth_tokens_to_file;
 use super::save_oauth_tokens_with_keyring;
 
@@ -143,7 +144,7 @@ pub(crate) fn resolve_oauth_tokens_from_store_policy<K: KeyringStore + Clone + '
     store_mode: OAuthCredentialsStoreMode,
     keyring_backend_kind: AuthKeyringBackendKind,
 ) -> Result<Option<ResolvedOAuthTokens>> {
-    match store_mode {
+    match platform_oauth_store_mode(store_mode)? {
         OAuthCredentialsStoreMode::Auto => {
             // Auto remains keyring-first at lifecycle startup. The returned source is then pinned
             // by the client transport recipe and OAuth persistor so retries, recovery, and
@@ -221,7 +222,7 @@ pub(crate) fn try_resolve_oauth_tokens_from_store_policy<K: KeyringStore + Clone
             .map(|tokens| tokens.map(|tokens| ResolvedOAuthTokens { tokens, store }))
     };
     let keyring = ResolvedOAuthCredentialStore::Keyring(keyring_backend_kind);
-    match store_mode {
+    match platform_oauth_store_mode(store_mode)? {
         OAuthCredentialsStoreMode::File => load(ResolvedOAuthCredentialStore::File),
         OAuthCredentialsStoreMode::Keyring => load(keyring),
         OAuthCredentialsStoreMode::Auto => match load(keyring) {

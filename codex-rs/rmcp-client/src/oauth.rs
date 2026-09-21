@@ -86,6 +86,23 @@ const KEYRING_SERVICE: &str = "Codex MCP Credentials";
 const MCP_OAUTH_SECRET_PREFIX: &str = "MCP_OAUTH";
 const REFRESH_SKEW_MILLIS: u64 = 30_000;
 
+fn platform_oauth_store_mode(
+    store_mode: OAuthCredentialsStoreMode,
+) -> Result<OAuthCredentialsStoreMode> {
+    if cfg!(target_env = "ohos") {
+        match store_mode {
+            OAuthCredentialsStoreMode::Auto | OAuthCredentialsStoreMode::File => {
+                Ok(OAuthCredentialsStoreMode::File)
+            }
+            OAuthCredentialsStoreMode::Keyring => anyhow::bail!(
+                "MCP OAuth keyring storage is unsupported on OpenHarmony; use auto or file storage"
+            ),
+        }
+    } else {
+        Ok(store_mode)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoredOAuthTokens {
     pub server_name: String,
@@ -206,6 +223,7 @@ impl StoredOAuthCredentialSnapshot {
         store_mode: OAuthCredentialsStoreMode,
         keyring_backend_kind: AuthKeyringBackendKind,
     ) -> Result<Option<StoredOAuthTokens>> {
+        let store_mode = platform_oauth_store_mode(store_mode)?;
         if self.store == ResolvedOAuthCredentialStore::File
             && store_mode == OAuthCredentialsStoreMode::Auto
         {
@@ -443,7 +461,7 @@ pub fn save_oauth_tokens(
     keyring_backend_kind: AuthKeyringBackendKind,
 ) -> Result<()> {
     let keyring_store = DefaultKeyringStore;
-    match store_mode {
+    match platform_oauth_store_mode(store_mode)? {
         OAuthCredentialsStoreMode::Auto => save_oauth_tokens_with_keyring_with_fallback_to_file(
             &keyring_store,
             keyring_backend_kind,
@@ -587,6 +605,12 @@ pub fn delete_oauth_tokens(
     store_mode: OAuthCredentialsStoreMode,
     keyring_backend_kind: AuthKeyringBackendKind,
 ) -> Result<bool> {
+    let store_mode = platform_oauth_store_mode(store_mode)?;
+    #[cfg(target_env = "ohos")]
+    if store_mode == OAuthCredentialsStoreMode::File {
+        let key = compute_store_key(server_name, url)?;
+        return delete_oauth_tokens_from_file(&key);
+    }
     let keyring_store = DefaultKeyringStore;
     delete_oauth_tokens_from_keyring_and_file(
         &keyring_store,
@@ -1121,6 +1145,9 @@ mod tests {
     use keyring::Error as KeyringError;
     use pretty_assertions::assert_eq;
     use std::sync::Arc;
+    #[cfg(target_env = "ohos")]
+    #[path = "ohos_tests.rs"]
+    mod ohos_tests;
     #[path = "persistor_tests.rs"]
     mod persistor_tests;
 
@@ -1167,6 +1194,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(not(target_env = "ohos"))]
     #[test]
     fn resolve_oauth_tokens_from_store_policy_uses_keyring_when_available() -> Result<()> {
         let _env = TempCodexHome::new();

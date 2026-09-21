@@ -1,0 +1,10 @@
+#!/system/bin/sh
+set -eu
+package_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# Preserve explicit CA settings, including private enterprise trust bundles.
+if [ -z "${SSL_CERT_FILE:-}" ] && [ -z "${SSL_CERT_DIR:-}" ] && \
+   [ -d /system/etc/security/certificates ]; then
+    export SSL_CERT_DIR=/system/etc/security/certificates
+fi
+export PATH="$package_dir/bin:$PATH"
+exec "$package_dir/bin/codex" "$@"

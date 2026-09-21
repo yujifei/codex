@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::path::PathBuf;
+#[cfg(not(any(target_os = "android", target_env = "ohos")))]
 use tempfile::Builder;
 
 #[derive(Debug, Clone)]
@@ -47,7 +48,7 @@ pub struct PastedImageInfo {
 }
 
 /// Capture image from system clipboard, encode to PNG, and return bytes + info.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_env = "ohos")))]
 pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageError> {
     let _span = tracing::debug_span!("paste_image_as_png").entered();
     tracing::debug!("attempting clipboard image read");
@@ -108,16 +109,21 @@ pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageErro
     ))
 }
 
-/// Android/Termux does not support arboard; return a clear error.
-#[cfg(target_os = "android")]
+/// Android/Termux and OpenHarmony do not support arboard; return a clear error.
+#[cfg(any(target_os = "android", target_env = "ohos"))]
 pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageError> {
-    Err(PasteImageError::ClipboardUnavailable(
-        "clipboard image paste is unsupported on Android".into(),
-    ))
+    let platform = if cfg!(target_env = "ohos") {
+        "OpenHarmony"
+    } else {
+        "Android"
+    };
+    Err(PasteImageError::ClipboardUnavailable(format!(
+        "clipboard image paste is unsupported on {platform}"
+    )))
 }
 
 /// Convenience: write to a temp file and return its path + info.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_env = "ohos")))]
 pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
     // First attempt: read image from system clipboard via arboard (native paths or image data).
     match paste_image_as_png() {
@@ -155,7 +161,7 @@ pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImag
 /// the Windows clipboard), attempt a WSL fallback that calls PowerShell on the
 /// Windows side to write the clipboard image to a temporary file, then return
 /// the corresponding WSL path.
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 fn try_wsl_clipboard_fallback(
     error: &PasteImageError,
 ) -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
@@ -195,7 +201,7 @@ fn try_wsl_clipboard_fallback(
 /// Try to call a Windows PowerShell command (several common names) to save the
 /// clipboard image to a temporary PNG and return the Windows path to that file.
 /// Returns None if no command succeeded or no image was present.
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 fn try_dump_windows_clipboard_image() -> Option<String> {
     // Powershell script: save image from clipboard to a temp png and print the path.
     // Force UTF-8 output to avoid encoding issues between powershell.exe (UTF-16LE default)
@@ -228,12 +234,17 @@ fn try_dump_windows_clipboard_image() -> Option<String> {
     None
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_env = "ohos"))]
 pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
     // Keep error consistent with paste_image_as_png.
-    Err(PasteImageError::ClipboardUnavailable(
-        "clipboard image paste is unsupported on Android".into(),
-    ))
+    let platform = if cfg!(target_env = "ohos") {
+        "OpenHarmony"
+    } else {
+        "Android"
+    };
+    Err(PasteImageError::ClipboardUnavailable(format!(
+        "clipboard image paste is unsupported on {platform}"
+    )))
 }
 
 /// Normalize pasted text for a single-line search query.

@@ -504,6 +504,11 @@ pub(super) fn create_auth_storage(
     mode: AuthCredentialsStoreMode,
     keyring_backend_kind: AuthKeyringBackendKind,
 ) -> Arc<dyn AuthStorageBackend> {
+    // OHOS has no native keyring backend. Resolve Auto to File for all
+    // operations, including logout, so fallback credentials can be deleted.
+    if cfg!(target_env = "ohos") && matches!(mode, AuthCredentialsStoreMode::Auto) {
+        return Arc::new(FileAuthStorage::new(codex_home));
+    }
     let keyring_store: Arc<dyn KeyringStore> = Arc::new(DefaultKeyringStore);
     create_auth_storage_with_store(codex_home, mode, keyring_store, keyring_backend_kind)
 }

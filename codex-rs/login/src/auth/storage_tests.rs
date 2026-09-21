@@ -14,6 +14,39 @@ use tempfile::tempdir;
 use codex_keyring_store::tests::MockKeyringStore;
 use keyring::Error as KeyringError;
 
+#[cfg(target_env = "ohos")]
+#[test]
+fn auto_storage_removes_file_credentials_on_ohos() -> anyhow::Result<()> {
+    for backend in [
+        AuthKeyringBackendKind::Direct,
+        AuthKeyringBackendKind::Secrets,
+    ] {
+        let codex_home = tempdir()?;
+        let storage = create_auth_storage(
+            codex_home.path().to_path_buf(),
+            AuthCredentialsStoreMode::Auto,
+            backend,
+        );
+        let auth = AuthDotJson {
+            auth_mode: Some(AuthMode::ApiKey),
+            openai_api_key: Some("ohos-storage-test-key".to_string()),
+            tokens: None,
+            last_refresh: None,
+            agent_identity: None,
+            personal_access_token: None,
+            bedrock_api_key: None,
+            bedrock_access_keys: None,
+        };
+        storage.save(&auth)?;
+        assert_eq!(storage.load()?, Some(auth));
+        assert!(get_auth_file(codex_home.path()).exists());
+        assert!(storage.delete()?);
+        assert!(!get_auth_file(codex_home.path()).exists());
+        assert_eq!(storage.load()?, None);
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn file_storage_load_returns_auth_dot_json() -> anyhow::Result<()> {
     let codex_home = tempdir()?;

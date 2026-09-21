@@ -237,6 +237,9 @@ fn get_bash_shell() -> Option<DetectedShell> {
     })
 }
 
+#[cfg(target_env = "ohos")]
+const SH_FALLBACK_PATHS: &[&str] = &["/system/bin/sh"];
+#[cfg(not(target_env = "ohos"))]
 const SH_FALLBACK_PATHS: &[&str] = &["/bin/sh"];
 
 fn get_sh_shell() -> Option<DetectedShell> {
@@ -321,7 +324,7 @@ pub fn ultimate_fallback_shell() -> DetectedShell {
     } else {
         DetectedShell {
             shell_type: ShellType::Sh,
-            shell_path: PathBuf::from("/bin/sh"),
+            shell_path: PathBuf::from(SH_FALLBACK_PATHS[0]),
         }
     }
 }
@@ -480,6 +483,10 @@ mod tests {
         );
         assert_eq!(
             detect_shell_type(PathBuf::from("/bin/sh")),
+            Some(ShellType::Sh)
+        );
+        assert_eq!(
+            detect_shell_type(PathBuf::from("/system/bin/sh")),
             Some(ShellType::Sh)
         );
         assert_eq!(detect_shell_type(PathBuf::from("sh")), Some(ShellType::Sh));

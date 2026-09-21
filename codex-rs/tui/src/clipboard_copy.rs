@@ -10,10 +10,11 @@
 //!    to the Windows clipboard through PowerShell if `arboard` fails. Finally, fall
 //!    back to terminal-mediated copy if no native/WSL clipboard path succeeds.
 //!
-//! On Linux, X11 and some Wayland compositors require the process that wrote the
+//! On desktop Linux, X11 and some Wayland compositors require the process that wrote the
 //! clipboard to keep its handle open. `ClipboardLease` wraps the `arboard::Clipboard`
 //! so callers can store it for the lifetime of the TUI. On other platforms the lease
 //! is always `None`.
+//! OpenHarmony uses terminal-mediated text copy because arboard requires desktop APIs.
 //!
 //! The module is intentionally narrow: text copy only, user-facing error strings,
 //! no reusable clipboard abstraction. Image paste lives in `clipboard_paste`.
@@ -61,12 +62,12 @@ pub(crate) fn copy_to_clipboard(text: &str) -> Result<Option<ClipboardLease>, St
 /// paths the lease is `None` — those backends do not require process-lifetime
 /// ownership.
 pub(crate) struct ClipboardLease {
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     _clipboard: Option<arboard::Clipboard>,
 }
 
 impl ClipboardLease {
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     fn native_linux(clipboard: arboard::Clipboard) -> Self {
         Self {
             _clipboard: Some(clipboard),
@@ -76,7 +77,7 @@ impl ClipboardLease {
     #[cfg(test)]
     pub(crate) fn test() -> Self {
         Self {
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
             _clipboard: None,
         }
     }
@@ -206,12 +207,12 @@ fn is_tmux_session() -> bool {
     std::env::var_os("TMUX").is_some() || std::env::var_os("TMUX_PANE").is_some()
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 fn is_wsl_session() -> bool {
     crate::clipboard_paste::is_probably_wsl()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(all(target_os = "linux", not(target_env = "ohos"))))]
 fn is_wsl_session() -> bool {
     false
 }
@@ -243,7 +244,7 @@ fn arboard_copy(text: &str) -> Result<Option<ClipboardLease>, String> {
 /// On Linux/X11 and some Wayland setups, clipboard contents are served by the
 /// process that last wrote them. Keep the `Clipboard` alive so the copied text
 /// remains pasteable while the TUI is running.
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 fn arboard_copy(text: &str) -> Result<Option<ClipboardLease>, String> {
     let _guard = SuppressStderr::new();
     let mut clipboard =
@@ -254,13 +255,18 @@ fn arboard_copy(text: &str) -> Result<Option<ClipboardLease>, String> {
     Ok(Some(ClipboardLease::native_linux(clipboard)))
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_env = "ohos"))]
 fn arboard_copy(_text: &str) -> Result<Option<ClipboardLease>, String> {
-    Err("native clipboard unavailable on Android".to_string())
+    let platform = if cfg!(target_env = "ohos") {
+        "OpenHarmony"
+    } else {
+        "Android"
+    };
+    Err(format!("native clipboard unavailable on {platform}"))
 }
 
 /// Copy text into the Windows clipboard from a WSL process.
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 fn wsl_clipboard_copy(text: &str) -> Result<(), String> {
     let mut child = std::process::Command::new("powershell.exe")
         .stdin(std::process::Stdio::piped())
@@ -305,7 +311,7 @@ fn wsl_clipboard_copy(text: &str) -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(all(target_os = "linux", not(target_env = "ohos"))))]
 fn wsl_clipboard_copy(_text: &str) -> Result<(), String> {
     Err("WSL clipboard fallback unavailable on this platform".to_string())
 }
@@ -444,10 +450,10 @@ impl Drop for SuppressStderr {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "android", target_env = "ohos")))]
 struct SuppressStderr;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "android", target_env = "ohos")))]
 impl SuppressStderr {
     fn new() -> Self {
         Self

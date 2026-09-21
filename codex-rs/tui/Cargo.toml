@@ -142,9 +142,9 @@ windows-sys = { version = "0.52", features = [
 ] }
 winsplit = "0.1"
 
-# Clipboard support via `arboard` is not available on Android/Termux.
-# Only include it for non-Android targets so the crate builds on Android.
-[target.'cfg(not(target_os = "android"))'.dependencies]
+# Android/Termux and OpenHarmony do not provide arboard's desktop clipboard APIs.
+# OpenHarmony uses target_os = "linux", so exclude it by target_env as well.
+[target.'cfg(not(any(target_os = "android", target_env = "ohos")))'.dependencies]
 arboard = { workspace = true }
 
 
