@@ -103,6 +103,17 @@ if command -v protoc >/dev/null 2>&1; then
 fi
 export AR_aarch64_unknown_linux_ohos="$OHOS_SDK_NATIVE/llvm/bin/llvm-ar"
 export RANLIB_aarch64_unknown_linux_ohos="$OHOS_SDK_NATIVE/llvm/bin/llvm-ranlib"
+# bindgen-driven build dependencies (vendored zstd-sys) look for libclang
+# through clang-sys, which does not know about the OHOS SDK layout.
+if [[ -z ${LIBCLANG_PATH:-} ]]; then
+    for cand in "$OHOS_SDK_NATIVE/llvm/lib" "$OHOS_SDK_NATIVE/llvm/lib64"; do
+        if compgen -G "$cand/libclang.so*" >/dev/null; then
+            LIBCLANG_PATH=$cand
+            export LIBCLANG_PATH
+            break
+        fi
+    done
+fi
 # Keep bundled C++ runtime lookup working when Codex hardens its environment.
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_RUSTFLAGS="${CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_RUSTFLAGS:-} -C link-arg=-Wl,-rpath,\$ORIGIN/../lib"
 # OHOS uses its own musl ABI; do not substitute a Linux-musl/Android target.
