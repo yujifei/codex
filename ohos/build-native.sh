@@ -19,7 +19,15 @@ if [[ $profile != release && $profile != dev ]]; then
     echo 'Profile must be release or dev.' >&2
     exit 2
 fi
-if [[ $(uname -s) != Linux || $(uname -m) != aarch64 ]]; then
+kernel=$(uname -s)
+case $kernel in
+    Linux | OpenHarmony | HarmonyOS | OHOS) ;;
+    *)
+        echo "Unsupported kernel: $kernel. Use an ARM64 OpenHarmony host, e.g. inside HiShell." >&2
+        exit 2
+        ;;
+esac
+if [[ $(uname -m) != aarch64 ]]; then
     echo 'Use this script on an ARM64 OpenHarmony host, e.g. inside HiShell.' >&2
     exit 2
 fi
@@ -59,6 +67,30 @@ export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-"$repo_dir/target-ohos"}
 export CARGO_TARGET_DIR
 mkdir -p -- "$CARGO_TARGET_DIR"
 CARGO_TARGET_DIR=$(cd -- "$CARGO_TARGET_DIR" && pwd)
+# OpenHarmony's uname answers "OpenHarmony" for -s, which third party configure
+# scripts (OpenSSL, CMake probes) do not recognise as a supported host. Shadow
+# it with a shim that reports Linux and passes every other flag through.
+shim_dir="$CARGO_TARGET_DIR/ohos-tools/uname-shim"
+mkdir -p -- "$shim_dir"
+if [[ ! -x $shim_dir/uname ]]; then
+    real_uname=$(PATH=/system/bin:/usr/bin:/bin command -v uname || true)
+    if [[ -n $real_uname ]]; then
+        cat > "$shim_dir/uname" <<EOF
+#!/system/bin/sh
+case "\$1" in
+    -s|'') echo Linux; exit 0 ;;
+    -a|-sr|-rs|-srm)
+        out=\$("$real_uname" "\$@") || exit \$?
+        echo "Linux \${out#* }"
+        exit 0
+        ;;
+esac
+exec "$real_uname" "\$@"
+EOF
+        chmod +x -- "$shim_dir/uname"
+    fi
+fi
+export PATH="$shim_dir:$PATH"
 # Name the compilers explicitly: Harmonybrew exposes the OHOS clang under
 # several aliases and CMake-based dependencies must not pick a host compiler.
 export CC_aarch64_unknown_linux_ohos=$(command -v clang)
