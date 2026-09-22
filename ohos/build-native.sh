@@ -31,30 +31,6 @@ if [[ $(uname -m) != aarch64 ]]; then
     echo 'Use this script on an ARM64 OpenHarmony host, e.g. inside HiShell.' >&2
     exit 2
 fi
-# Harmonybrew installs the SDK without the usual `native/` level, so the prefix
-# itself is the "native" directory: <prefix>/{llvm,sysroot,build,build-tools}.
-if [[ -z ${OHOS_SDK_NATIVE:-} ]]; then
-    for cand in "${HOMEBREW_PREFIX:-$HOME/.harmonybrew}/opt/ohos-sdk-native" \
-        "$(command -v brew >/dev/null && brew --prefix ohos-sdk-native 2>/dev/null || true)"; do
-        if [[ -n $cand && -x $cand/llvm/bin/clang && -d $cand/sysroot ]]; then
-            OHOS_SDK_NATIVE=$cand
-            break
-        fi
-    done
-fi
-: "${OHOS_SDK_NATIVE:?Set OHOS_SDK_NATIVE to the SDK native directory}"
-export OHOS_SDK_NATIVE
-OHOS_SDK_NATIVE=$(cd -- "$OHOS_SDK_NATIVE" && pwd)
-for tool in clang clang++ llvm-ar llvm-ranlib llvm-readelf; do
-    if [[ ! -x "$OHOS_SDK_NATIVE/llvm/bin/$tool" ]]; then
-        echo "Missing SDK tool: $OHOS_SDK_NATIVE/llvm/bin/$tool" >&2
-        exit 2
-    fi
-done
-if [[ ! -d "$OHOS_SDK_NATIVE/sysroot/usr/lib/aarch64-linux-ohos" ]]; then
-    echo 'SDK does not contain the ARM64 OHOS sysroot.' >&2
-    exit 2
-fi
 for tool in cargo rustc perl make cmake python3 clang clang++; do
     command -v "$tool" >/dev/null || { echo "Missing host tool: $tool"; exit 2; }
 done
@@ -67,38 +43,22 @@ export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-"$repo_dir/target-ohos"}
 export CARGO_TARGET_DIR
 mkdir -p -- "$CARGO_TARGET_DIR"
 CARGO_TARGET_DIR=$(cd -- "$CARGO_TARGET_DIR" && pwd)
-# OpenHarmony's uname answers "OpenHarmony" for -s, which third party configure
-# scripts (OpenSSL, CMake probes) do not recognise as a supported host. Shadow
-# it with a shim that reports Linux and passes every other flag through.
 shim_dir="$CARGO_TARGET_DIR/ohos-tools/shims"
-mkdir -p -- "$shim_dir"
-if [[ ! -x $shim_dir/uname ]]; then
-    real_uname=$(PATH=/system/bin:/usr/bin:/bin command -v uname || true)
-    if [[ -n $real_uname ]]; then
-        cat > "$shim_dir/uname" <<EOF
-#!/system/bin/sh
-case "\$1" in
-    -s|'') echo Linux; exit 0 ;;
-    -a|-sr|-rs|-srm)
-        out=\$("$real_uname" "\$@") || exit \$?
-        echo "Linux \${out#* }"
-        exit 0
-        ;;
-esac
-exec "$real_uname" "\$@"
-EOF
-        chmod +x -- "$shim_dir/uname"
-    fi
-fi
+# Locates the SDK and shadows uname, which third party configure scripts
+# (OpenSSL, CMake probes) do not recognise as a supported host.
+source "$repo_dir/ohos/ohos-host-env.sh" "$shim_dir"
 # Harmonybrew publishes liblzma and libbz2 as shared libraries, so the
 # pkg-config probes in lzma-sys and bzip2-sys link them dynamically and the
 # resulting CLI carries NEEDED entries that ohos/package.py refuses to bundle.
 # Hide just those two packages so both crates fall back to their bundled static
 # sources, and forward every other probe to the real pkg-config.
-if [[ ! -x $shim_dir/pkg-config ]]; then
-    real_pkg_config=$(command -v pkg-config || command -v pkgconf || true)
-    if [[ -n $real_pkg_config ]]; then
-        cat > "$shim_dir/pkg-config" <<EOF
+mkdir -p -- "$shim_dir"
+real_pkg_config=$(
+    PATH="${PATH#"$shim_dir":}" command -v pkg-config ||
+        PATH="${PATH#"$shim_dir":}" command -v pkgconf || true
+)
+if [[ -n $real_pkg_config ]]; then
+    cat > "$shim_dir/pkg-config" <<EOF
 #!/system/bin/sh
 for arg in "\$@"; do
     case \$arg in
@@ -107,13 +67,9 @@ for arg in "\$@"; do
 done
 exec "$real_pkg_config" "\$@"
 EOF
-        chmod +x -- "$shim_dir/pkg-config"
-    fi
-fi
-if [[ -x $shim_dir/pkg-config ]]; then
+    chmod +x -- "$shim_dir/pkg-config"
     export PKG_CONFIG="$shim_dir/pkg-config"
 fi
-export PATH="$shim_dir:$PATH"
 # Name the compilers explicitly: Harmonybrew exposes the OHOS clang under
 # several aliases and CMake-based dependencies must not pick a host compiler.
 export CC_aarch64_unknown_linux_ohos=$(command -v clang)
