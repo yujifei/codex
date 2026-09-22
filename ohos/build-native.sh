@@ -95,6 +95,12 @@ export PATH="$shim_dir:$PATH"
 # several aliases and CMake-based dependencies must not pick a host compiler.
 export CC_aarch64_unknown_linux_ohos=$(command -v clang)
 export CXX_aarch64_unknown_linux_ohos=$(command -v clang++)
+# code-mode-protocol shells out to protoc; the vendored protoc binary is
+# unsigned and cannot execute on OpenHarmony, so prefer a signed system one.
+if command -v protoc >/dev/null 2>&1; then
+    export PROTOC
+    PROTOC=$(command -v protoc)
+fi
 export AR_aarch64_unknown_linux_ohos="$OHOS_SDK_NATIVE/llvm/bin/llvm-ar"
 export RANLIB_aarch64_unknown_linux_ohos="$OHOS_SDK_NATIVE/llvm/bin/llvm-ranlib"
 # Keep bundled C++ runtime lookup working when Codex hardens its environment.
