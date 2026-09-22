@@ -105,7 +105,18 @@ PTY 和文件编辑验证。遇到沙箱错误应继续定位设备能力和策�
 - CLI/MCP OAuth 自动存储改用文件，保证保存、读取和退出登录一致。
 - 从系统证书目录读取 TLS 根证书，保留证书验证。
 
-当前未提供 V8 Code Mode host、语音 host 和图形剪贴板。
+## Code Mode host（V8）
+
+`v8`（rusty_v8）crate 未发布 `aarch64-unknown-linux-ohos` 预编译包，因此
+`ohos/build-v8.sh` 直接编译 crate 自带的 V8 15.0 源码：对
+`v8-150.4.0` 应用 `ohos/v8/v8-ohos-source.patch`（OpenHarmony ifdef 与 OHOS gn
+工具链），用 gn + ninja 交叉编译出 `librusty_v8.a`，并重新生成 crate 未随附的
+指针压缩 + sandbox bindgen 绑定。设置 `RUSTY_V8_ARCHIVE` 与
+`RUSTY_V8_SRC_BINDING_PATH` 后，`ohos/build.sh` 会额外编译
+`codex-code-mode-host`；打包时用 `--code-mode-host` 一并装入。详见
+[英文说明](README.md)。
+
+语音 host 和图形剪贴板仍不在最小 CLI 内。
 Git、rg 及 MCP 服务所需运行时需设备另行提供。
 现有 Windows CLI 和浏览器工程没有被此移植替换。
 
@@ -121,6 +132,8 @@ Git、rg 及 MCP 服务所需运行时需设备另行提供。
 - 2026-09-21：API 24 / OpenHarmony-6.1.1.130 设备完成传输和 SHA-256
   校验；普通 hdc shell 执行原 CLI、原 bwrap 及已签名 bwrap 均被拒绝，
   尚未进入程序，不能判断运行时和沙箱兼容性。
+- 2026-09-22：源码构建的 V8 host 已在真机执行 code mode JavaScript
+  （`text(6 * 7);` 返回 `42`），验证 V8 初始化、ICU 数据与 JIT 可用。
 
 参考：[华为原生工具签名与部署说明](https://consumer.huawei.com/cn/support/content/zh-cn16078461/)、
 [外部扩展程序设置说明](https://consumer.huawei.com/cn/support/content/zh-cn16079826/)。

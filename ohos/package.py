@@ -59,6 +59,11 @@ def main():
     parser.add_argument("binary", type=Path)
     parser.add_argument("--sdk-native", type=Path, required=True)
     parser.add_argument("--bwrap", type=Path, help="Cross-built bubblewrap executable")
+    parser.add_argument(
+        "--code-mode-host",
+        type=Path,
+        help="Cross-built codex-code-mode-host executable to bundle next to the CLI",
+    )
     parser.add_argument("--libcap-license", type=Path)
     parser.add_argument(
         "--sign-tool",
@@ -97,6 +102,33 @@ def main():
         runtime_libraries.append(library)
     if runtime_libraries and "$ORIGIN/../lib" not in elf_report:
         raise ValueError("Binary needs an ORIGIN-relative runtime library search path")
+    host_report = None
+    if args.code_mode_host:
+        host_report = inspect_elf(args.code_mode_host, readelf)
+        if "ld-musl-aarch64.so.1" not in host_report:
+            raise ValueError("Code-mode host is missing the OHOS/musl ARM64 interpreter")
+        for name in re.findall(r"\(NEEDED\).*?\[(.*?)\]", host_report):
+            if name in {
+                "libc.so",
+                "libm.so",
+                "libdl.so",
+                "libpthread.so",
+                "librt.so",
+                "libtime_service_ndk.so",
+            }:
+                continue
+            if name not in {"libc++_shared.so", "libunwind.so"}:
+                raise ValueError(
+                    f"Resolve this runtime dependency before packaging: {name}"
+                )
+            library = sdk / "llvm/lib/aarch64-unknown-linux-ohos" / name
+            if library not in runtime_libraries:
+                inspect_elf(library, readelf)
+                runtime_libraries.append(library)
+        if runtime_libraries and "$ORIGIN/../lib" not in host_report:
+            raise ValueError(
+                "Code-mode host needs an ORIGIN-relative runtime library search path"
+            )
     bwrap_report = None
     if args.bwrap:
         bwrap_report = inspect_elf(args.bwrap, readelf)
@@ -139,6 +171,21 @@ def main():
     signatures = {}
     if args.sign_tool:
         signatures["bin/codex"] = sign_elf(package_dir / "bin/codex", args.sign_tool)
+    if args.code_mode_host:
+        shutil.copy2(args.code_mode_host, package_dir / "bin/codex-code-mode-host")
+        (package_dir / "bin/codex-code-mode-host").chmod(0o755)
+        subprocess.run(
+            [
+                str(sdk / "llvm/bin/llvm-strip"),
+                "--strip-debug",
+                str(package_dir / "bin/codex-code-mode-host"),
+            ],
+            check=True,
+        )
+        if args.sign_tool:
+            signatures["bin/codex-code-mode-host"] = sign_elf(
+                package_dir / "bin/codex-code-mode-host", args.sign_tool
+            )
     if args.bwrap:
         resources = package_dir / "codex-resources"
         resources.mkdir()
@@ -207,6 +254,7 @@ def main():
         executable = relative in {
             "codex",
             "bin/codex",
+            "bin/codex-code-mode-host",
             "codex-resources/bwrap",
             "smoke-test.sh",
         }

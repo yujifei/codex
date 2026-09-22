@@ -62,13 +62,42 @@ export CXXFLAGS_aarch64_unknown_linux_ohos="${CXXFLAGS_aarch64_unknown_linux_oho
 export CARGO_PROFILE_DEV_DEBUG=${CARGO_PROFILE_DEV_DEBUG:-0}
 export CARGO_PROFILE_RELEASE_DEBUG=${CARGO_PROFILE_RELEASE_DEBUG:-0}
 cargo "$mode" --locked --keep-going --target "$target" --profile "$profile" -p codex-cli --bin codex
-if [[ $mode == check ]]; then
-    exit 0
-fi
 profile_dir=$profile
 if [[ $profile == dev ]]; then
     profile_dir=debug
 fi
+# rusty_v8 publishes no prebuilt archive for aarch64-unknown-linux-ohos, so the
+# code-mode host is only built when a locally cross-compiled librusty_v8.a is
+# supplied through RUSTY_V8_ARCHIVE.
+host_binary=''
+if [[ -n ${RUSTY_V8_ARCHIVE:-} ]]; then
+    export RUSTY_V8_ARCHIVE
+    # librusty_v8.a embeds a static libc++; keep the v8 crate from also asking
+    # the linker for a dynamic C++ standard library.
+    export CXXSTDLIB=
+    # rustc links with -nodefaultlibs, so clang's compiler-rt builtins are never
+    # added automatically. V8's ARM64 CpuFeatures::FlushICache needs
+    # __clear_cache, which glibc targets get from libgcc_s but OHOS does not.
+    builtins=$(
+        "$OHOS_SDK_NATIVE/llvm/bin/clang" --target=aarch64-linux-ohos \
+            --sysroot="$OHOS_SDK_NATIVE/sysroot" -print-libgcc-file-name
+    )
+    if [[ ! -f $builtins ]]; then
+        echo "Missing compiler-rt builtins archive: $builtins" >&2
+        exit 2
+    fi
+    export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_RUSTFLAGS="${CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_RUSTFLAGS:-} -C link-arg=$builtins"
+    cargo "$mode" --locked --keep-going --target "$target" --profile "$profile" \
+        -p codex-code-mode-host --bin codex-code-mode-host
+    host_binary="$CARGO_TARGET_DIR/$target/$profile_dir/codex-code-mode-host"
+fi
+if [[ $mode == check ]]; then
+    exit 0
+fi
 binary="$CARGO_TARGET_DIR/$target/$profile_dir/codex"
 "$OHOS_SDK_NATIVE/llvm/bin/llvm-readelf" -h -l -d "$binary"
 echo "Native ARM64 OHOS executable: $binary"
+if [[ -n $host_binary ]]; then
+    "$OHOS_SDK_NATIVE/llvm/bin/llvm-readelf" -h -l -d "$host_binary"
+    echo "Native ARM64 OHOS code-mode host: $host_binary"
+fi

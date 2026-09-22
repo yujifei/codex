@@ -47,8 +47,12 @@ Package the result with:
 python3 ohos/package.py "$CARGO_TARGET_DIR/aarch64-unknown-linux-ohos/release/codex" \
   --sdk-native "$OHOS_SDK_NATIVE" --name codex-ohos-arm64-0.153.4-signed \
   --sign-tool "$BINARY_SIGN_TOOL" \
+  --code-mode-host "$CARGO_TARGET_DIR/aarch64-unknown-linux-ohos/release/codex-code-mode-host" \
   --bwrap "$BWRAP_BINARY" --libcap-license "$OHOS_LIBCAP_WORK_DIR/libcap-2.78/License"
 ```
+
+`--code-mode-host` is optional; see the Code Mode host section below for how to
+produce that binary.
 
 This produces an archive and an unpacked directory under `ohos/dist/`, including
 the launcher, sandbox helper, licenses, ELF dependency reports and build metadata.
@@ -126,14 +130,40 @@ Run `./smoke-test.sh` on the device to check startup and read-only sandbox
 enforcement without logging in. It uses a fresh temporary configuration and
 removes its own test directory afterward. It does not validate network isolation.
 
-The standalone `codex-code-mode-host` (V8), voice host and native desktop
-clipboard are not included in the minimal CLI. Regular tool mode can operate
-without the Code Mode host; a model that requires `CodeModeOnly` cannot.
-`rg`, Git and runtimes for any configured MCP servers are separate device tools.
+## Code Mode host (V8)
+
+`codex-code-mode-host` embeds V8 through the `v8` (rusty_v8) crate, which
+publishes no prebuilt archive for `aarch64-unknown-linux-ohos`. Build the
+archive from the crate's own V8 sources instead:
+
+```sh
+export OHOS_SDK_NATIVE=/path/to/openharmony/native
+export OHOS_REF_TREE=/path/to/ohos-adapted-chromium/src   # supplies gn toolchain + icudtl.dat
+bash ohos/build-v8.sh
+RUSTY_V8_ARCHIVE=$HOME/codex-ohos-v8/librusty_v8.a \
+RUSTY_V8_SRC_BINDING_PATH=$HOME/codex-ohos-v8/gen/src_binding_ptrcomp_sandbox_release_aarch64-unknown-linux-ohos.rs \
+  bash ohos/build.sh build release
+```
+
+`build-v8.sh` applies `ohos/v8/v8-ohos-source.patch` (OpenHarmony ifdefs plus an
+OHOS gn toolchain) to a copy of the `v8-150.4.0` crate, cross-compiles
+`librusty_v8.a` with gn + ninja, and regenerates the pointer-compression +
+sandbox bindgen binding that the crate does not ship for any target. With
+`RUSTY_V8_ARCHIVE` set, `build.sh` additionally builds
+`codex-code-mode-host`; without it only the CLI is built. `rustc` links with
+`-nodefaultlibs`, so `build.sh` adds the SDK's `libclang_rt.builtins.a` to the
+host link for V8's `__clear_cache`.
+
+The standalone voice host and native desktop clipboard remain outside the
+minimal CLI. `rg`, Git and runtimes for any configured MCP servers are separate
+device tools.
 
 ## Verification status
 
-The ARM64 Release CLI and bubblewrap have linked successfully. The login and MCP
+The ARM64 Release CLI, bubblewrap and `codex-code-mode-host` (source-built V8)
+have linked successfully. On a connected HarmonyOS PC the host executed a
+code-mode JavaScript cell (`text(6 * 7);` returned `42`), which exercises V8
+initialisation, ICU data and JIT on device. The login and MCP
 OAuth tests also pass cross-target `cargo check --tests`. On the Linux host,
 167 shell-command tests and 172 selected clipboard/storage/OAuth tests passed.
 Two gateway tests initially failed with inherited proxy variables; clearing
