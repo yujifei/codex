@@ -62,6 +62,52 @@ and then signs it. Never strip or modify an ELF after signing. It also writes a
 SHA-256 sidecar for the archive. The packager
 refuses Windows/x86 binaries and unexpected runtime dependencies.
 
+## On-device native build (HiShell)
+
+Codex, the code-mode host and the sandbox helper can also be compiled directly
+on an ARM64 HarmonyOS PC where host == target, with no cross sysroot or compiler
+wrappers: the Harmonybrew toolchain already targets OpenHarmony and the SDK's
+wrapped `ld.lld` signs each binary at link time. This is how the on-device
+binaries were produced and verified. One-time prerequisites inside HiShell:
+
+- [Harmonybrew](https://gitee.com/openharmony-sig/harmonybrew), then
+  `brew install llvm-gcc-compat ohos-sdk-native protobuf perl make cmake python3
+  git`. `llvm-gcc-compat` provides `cc`/`clang`; `protobuf` provides a signed
+  `protoc` (the vendored `protoc` binary is unsigned and cannot exec on device).
+  The bare OHOS userland ships none of these build tools.
+- `rustup` is keg-only: add `$(brew --prefix rustup)/bin` to `PATH`, then
+  `rustup toolchain install 1.95.0` and `rustup target add
+  aarch64-unknown-linux-ohos`. Point `RUSTUP_DIST_SERVER` at a static mirror
+  (for example `https://mirror.sjtu.edu.cn/rust-static`) if the default CDN
+  returns "could not download nonexistent rust version".
+
+Then, in the checkout:
+
+```sh
+export OHOS_SDK_NATIVE="$(brew --prefix ohos-sdk-native)"   # auto-detected if unset
+export RUSTY_V8_ARCHIVE=/path/to/librusty_v8.a               # reuse the cross-built V8
+export RUSTY_V8_SRC_BINDING_PATH=/path/to/src_binding_ptrcomp_sandbox_release_aarch64-unknown-linux-ohos.rs
+bash ohos/build-native.sh build dev          # or: build release
+export OHOS_LIBCAP_WORK_DIR="$HOME/codex-ohos-bwrap"
+bash ohos/build-bwrap.sh                      # libcap + bwrap, signed at link time
+cp "$OHOS_LIBCAP_WORK_DIR/cargo-target/aarch64-unknown-linux-ohos/release/bwrap" \
+   "target-ohos/aarch64-unknown-linux-ohos/debug/codex-resources/bwrap"
+```
+
+`build-native.sh` exports `PROTOC` and `LIBCLANG_PATH` and installs a
+`pkg-config` shim that hides only `liblzma` and `bzip2`, so those crates use
+their bundled static sources instead of the Harmonybrew shared libraries that
+`package.py` would refuse (`NEEDED liblzma.so.5`/`libbz2.so.1.0`). The shared
+`ohos-host-env.sh` shadows two tools the OHOS host lacks on `PATH`: `uname`
+(reports `OpenHarmony`, which third-party configure scripts reject) and
+`install` (a toybox applet under `/system/bin` that libcap's makefile needs).
+
+If the device's crates.io CDN stalls, pre-seed the cargo cache from a fast
+machine and build offline: copy the missing `.crate` files (the `Cargo.lock`
+packages whose `source` is a registry) into
+`~/.cargo/registry/cache/index.crates.io-*/` and export `CARGO_NET_OFFLINE=true`.
+The git dependencies still require GitHub to be reachable.
+
 ## Port changes
 
 - Use `/system/bin/sh` when no supported user shell is found.
@@ -130,6 +176,24 @@ Run `./smoke-test.sh` on the device to check startup and read-only sandbox
 enforcement without logging in. It uses a fresh temporary configuration and
 removes its own test directory afterward. It does not validate network isolation.
 
+Inside HiShell on a HarmonyOS PC the sandbox cannot be created at all. The
+terminal app runs under a seccomp filter (`Seccomp: 2` in `/proc/self/status`)
+that kills every `unshare(CLONE_NEWUSER/NEWNS/NEWPID)` with `SIGSYS`, and it
+holds ambient capabilities (`CapPrm=CapAmb=0x2a`), so the bundled `bwrap` aborts
+with "Unexpected capabilities but not setuid" before building any namespace.
+Both are app-domain policies a child process cannot undo, and seccomp filters
+are inherited across `fork`/`exec`, so `codex` and `bwrap` are equally affected.
+`bwrap` itself is fine — it builds, signs and runs (`bwrap --version`) — the
+kernel simply forbids the namespaces it needs, so `smoke-test.sh` passes its
+`--version`/`--help`/`bwrap --version` checks but fails its final read-only
+enforcement step by design. To use Codex on the device, run it unsandboxed with
+`--dangerously-bypass-approvals-and-sandbox` (or `-s danger-full-access`) and
+treat the HiShell app sandbox as the isolation boundary; Codex then starts a
+session reporting `sandbox: danger-full-access` and never execs `bwrap`. A plain
+`uid=2000(shell)` HDC session has neither the seccomp filter nor the ambient
+caps, but it cannot execute the signed binaries from shared storage (exit 126),
+so it is not a usable sandbox host either.
+
 ## Code Mode host (V8)
 
 `codex-code-mode-host` embeds V8 through the `v8` (rusty_v8) crate, which
@@ -171,6 +235,16 @@ those variables only for the test process made the complete selection pass. A
 connected device is required to validate TUI rendering, PTY/process handling,
 TLS/login, file editing, and sandbox behavior. The SDK's `libc.so` is a link
 stub, so it cannot be used as a working runtime for QEMU smoke tests.
+
+On 2026-09-22 the CLI, `codex-code-mode-host` and `bwrap` were built natively on
+the device (host == target, Harmonybrew + rustup 1.95.0) and verified there:
+`codex --version` reports `codex-cli 0.153.4`; `codex --help`, `codex exec
+--help` and `codex-code-mode-host --help` all exit 0; and `codex exec
+--dangerously-bypass-approvals-and-sandbox` starts a session (`sandbox:
+danger-full-access`) that reaches the model network layer, confirming the native
+binaries run end to end without `bwrap`. The bundled sandbox remains unavailable
+under HiShell because a seccomp filter blocks `unshare` (see Deployment
+prerequisites).
 
 ## Sources
 

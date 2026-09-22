@@ -6,8 +6,9 @@
 `/mnt/d/AlProject/codex-ohos`。
 
 这是在鸿蒙终端中运行的原生命令行程序，不需要 Node.js。
-当前交付的是交叉编译版本。已连接正式系统设备并完成文件传输，
-但普通 hdc shell 拒绝启动原生程序，尚未证明实机可用。
+既可在 WSL 交叉编译，也可在设备端（HiShell，host == target）原生构建。
+已在正式系统设备上验证原生二进制可启动运行；命令沙箱受平台 seccomp
+策略限制不可用，需以非沙箱模式运行（见「设备部署和验证」）。
 
 ## 参考工程与 SDK
 
@@ -53,6 +54,50 @@ python3 ohos/package.py "$CARGO_TARGET_DIR/aarch64-unknown-linux-ohos/release/co
 为避免覆盖，打包脚本要求使用尚不存在的包目录名称。
 可复用的构建和打包参数见 [英文说明](README.md)。
 
+## 设备端原生构建（HiShell）
+
+也可以在 ARM64 鸿蒙 PC 上直接原生编译（host == target），无需交叉 sysroot
+和编译器包装脚本：Harmonybrew 工具链本身就以 OpenHarmony 为目标，SDK 封装的
+`ld.lld` 在链接期自动签名。设备上的二进制正是这样产出并验证的。HiShell 内
+一次性准备：
+
+- 安装 [Harmonybrew](https://gitee.com/openharmony-sig/harmonybrew)，再
+  `brew install llvm-gcc-compat ohos-sdk-native protobuf perl make cmake
+  python3 git`。`llvm-gcc-compat` 提供 `cc`/`clang`；`protobuf` 提供已签名的
+  `protoc`（vendored 的 `protoc` 未签名，在设备上无法执行）。鸿蒙裸用户态
+  不含这些构建工具。
+- `rustup` 是 keg-only：把 `$(brew --prefix rustup)/bin` 加入 `PATH`，再
+  `rustup toolchain install 1.95.0`、`rustup target add
+  aarch64-unknown-linux-ohos`。若默认 CDN 报 "could not download nonexistent
+  rust version"，把 `RUSTUP_DIST_SERVER` 指向静态镜像（如
+  `https://mirror.sjtu.edu.cn/rust-static`）。
+
+然后在源码目录：
+
+```sh
+export OHOS_SDK_NATIVE="$(brew --prefix ohos-sdk-native)"   # 未设置时自动探测
+export RUSTY_V8_ARCHIVE=/path/to/librusty_v8.a               # 复用交叉编译好的 V8
+export RUSTY_V8_SRC_BINDING_PATH=/path/to/src_binding_ptrcomp_sandbox_release_aarch64-unknown-linux-ohos.rs
+bash ohos/build-native.sh build dev          # 或 build release
+export OHOS_LIBCAP_WORK_DIR="$HOME/codex-ohos-bwrap"
+bash ohos/build-bwrap.sh                      # libcap + bwrap，链接期自动签名
+cp "$OHOS_LIBCAP_WORK_DIR/cargo-target/aarch64-unknown-linux-ohos/release/bwrap" \
+   "target-ohos/aarch64-unknown-linux-ohos/debug/codex-resources/bwrap"
+```
+
+`build-native.sh` 会导出 `PROTOC` 和 `LIBCLANG_PATH`，并装一个只屏蔽
+`liblzma`、`bzip2` 的 `pkg-config` shim，让这两个 crate 回落到自带的静态源码，
+而不是 Harmonybrew 的动态库（否则 CLI 会带上 `package.py` 拒绝的
+`NEEDED liblzma.so.5`/`libbz2.so.1.0`）。共享的 `ohos-host-env.sh` 会遮蔽
+PATH 上缺失的两个工具：`uname`（在鸿蒙上报 `OpenHarmony`，第三方 configure
+脚本不识别）和 `install`（`/system/bin` 下的 toybox applet，libcap 的 makefile
+需要它）。
+
+若设备的 crates.io CDN 停滞，可从网速快的机器预填 cargo 缓存后离线构建：把
+缺失的 `.crate`（`Cargo.lock` 中 `source` 为 registry 的包）拷进
+`~/.cargo/registry/cache/index.crates.io-*/`，再导出 `CARGO_NET_OFFLINE=true`。
+git 依赖仍需能访问 GitHub。
+
 ## 设备部署和验证
 
 正式版鸿蒙电脑要求 ELF 代码签名。必须先给 bwrap 签名，再计算其
@@ -97,6 +142,22 @@ check_for_update_on_startup = false
 程序启动及只读目录的写入拒绝，但不能代替完整的网络隔离、登录、
 PTY 和文件编辑验证。遇到沙箱错误应继续定位设备能力和策略。
 
+在鸿蒙 PC 的 HiShell 内，沙箱完全无法建立。终端应用运行在一个 seccomp
+过滤器下（`/proc/self/status` 里 `Seccomp: 2`），任何
+`unshare(CLONE_NEWUSER/NEWNS/NEWPID)` 都会被 `SIGSYS` 杀死；同时进程带有
+ambient capabilities（`CapPrm=CapAmb=0x2a`），于是自带的 `bwrap` 在建立任何
+namespace 之前就因 "Unexpected capabilities but not setuid" 中止。两者都是
+子进程无法解除的应用域策略，且 seccomp 过滤器跨 `fork`/`exec` 继承，`codex`
+和 `bwrap` 同样受限。`bwrap` 本身没问题——它能构建、签名、运行
+（`bwrap --version`）——只是内核禁止它所需的 namespace，因此 `smoke-test.sh`
+的 `--version`/`--help`/`bwrap --version` 检查通过，而最后的只读隔离步骤按
+设计失败。要在设备上使用 Codex，请以非沙箱方式运行
+`--dangerously-bypass-approvals-and-sandbox`（或 `-s danger-full-access`），
+把 HiShell 应用沙箱当作隔离边界；此时 Codex 会以
+`sandbox: danger-full-access` 启动会话，且不会调用 `bwrap`。普通
+`uid=2000(shell)` 的 hdc 会话既无该 seccomp 过滤器也无 ambient caps，但它
+无法从共享存储执行已签名二进制（退出码 126），所以也不是可用的沙箱宿主。
+
 ## 已处理的兼容问题
 
 - `/system/bin/sh` 路径、鸿蒙 libc 的 ioctl/socket 类型。
@@ -134,6 +195,14 @@ Git、rg 及 MCP 服务所需运行时需设备另行提供。
   尚未进入程序，不能判断运行时和沙箱兼容性。
 - 2026-09-22：源码构建的 V8 host 已在真机执行 code mode JavaScript
   （`text(6 * 7);` 返回 `42`），验证 V8 初始化、ICU 数据与 JIT 可用。
+- 2026-09-22：CLI、`codex-code-mode-host` 与 `bwrap` 已在设备上原生构建
+  （host == target，Harmonybrew + rustup 1.95.0）并验证：`codex --version`
+  返回 `codex-cli 0.153.4`；`codex --help`、`codex exec --help`、
+  `codex-code-mode-host --help` 均退出 0；`codex exec
+  --dangerously-bypass-approvals-and-sandbox` 能以
+  `sandbox: danger-full-access` 启动会话并到达模型网络层，证明原生二进制
+  无需 `bwrap` 即可端到端运行。HiShell 下自带沙箱仍不可用，因为 seccomp
+  过滤器阻断了 `unshare`（见「设备部署和验证」）。
 
 参考：[华为原生工具签名与部署说明](https://consumer.huawei.com/cn/support/content/zh-cn16078461/)、
 [外部扩展程序设置说明](https://consumer.huawei.com/cn/support/content/zh-cn16079826/)。
