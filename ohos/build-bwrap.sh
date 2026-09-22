@@ -26,7 +26,7 @@ if [[ ${CODEX_SKIP_BWRAP_BUILD+x} ]]; then
     echo 'Unset CODEX_SKIP_BWRAP_BUILD; this script must build the real sandbox helper.' >&2
     exit 2
 fi
-for tool in cargo rustc make pkg-config tar xz sha256sum; do
+for tool in cargo rustc make pkg-config tar xz sha256sum install; do
     command -v "$tool" >/dev/null || { echo "Missing host tool: $tool" >&2; exit 2; }
 done
 # Only _makenames runs on the build host; on the device that is the same
