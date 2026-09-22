@@ -60,7 +60,20 @@ EOF
                 chmod +x -- "$ohos_shim_dir/uname"
             fi
         fi
+        # The OHOS userland provides install(1) as a toybox applet under
+        # /system/bin, but Harmonybrew's PATH omits it, so libcap's makefile
+        # cannot find it. Shadow it with a shim that execs the system applet.
+        if ! command -v install >/dev/null 2>&1; then
+            real_install=$(PATH=/system/bin:/usr/bin:/bin command -v install || true)
+            if [[ -n $real_install ]]; then
+                cat > "$ohos_shim_dir/install" <<EOF
+#!/system/bin/sh
+exec "$real_install" "\$@"
+EOF
+                chmod +x -- "$ohos_shim_dir/install"
+            fi
+        fi
         export PATH="$ohos_shim_dir:$PATH"
         ;;
 esac
-unset ohos_shim_parent ohos_shim_dir real_uname tool cand
+unset ohos_shim_parent ohos_shim_dir real_uname real_install tool cand

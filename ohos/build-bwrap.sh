@@ -26,7 +26,7 @@ if [[ ${CODEX_SKIP_BWRAP_BUILD+x} ]]; then
     echo 'Unset CODEX_SKIP_BWRAP_BUILD; this script must build the real sandbox helper.' >&2
     exit 2
 fi
-for tool in cargo rustc make pkg-config tar xz sha256sum install; do
+for tool in cargo rustc make pkg-config tar xz sha256sum; do
     command -v "$tool" >/dev/null || { echo "Missing host tool: $tool" >&2; exit 2; }
 done
 # Only _makenames runs on the build host; on the device that is the same
@@ -56,6 +56,9 @@ CARGO_TARGET_DIR=$(cd -- "$CARGO_TARGET_DIR" && pwd)
 # Locates the SDK (Harmonybrew when building on the device) and shadows uname,
 # which libcap's makefiles do not recognise as a supported host.
 source "$repo_dir/ohos/ohos-host-env.sh" "$CARGO_TARGET_DIR/ohos-tools/shims"
+# libcap's makefile shells out to install(1). ohos-host-env.sh shims it from the
+# system toybox applet when the host PATH lacks it; confirm it resolved.
+command -v install >/dev/null || { echo 'Missing host tool: install' >&2; exit 2; }
 cc_wrapper="$CARGO_TARGET_DIR/ohos-tools/ohos-clang"
 cp -- "$repo_dir/ohos/clang-wrapper.sh" "$cc_wrapper"
 chmod +x -- "$cc_wrapper"
