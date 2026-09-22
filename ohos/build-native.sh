@@ -70,7 +70,7 @@ CARGO_TARGET_DIR=$(cd -- "$CARGO_TARGET_DIR" && pwd)
 # OpenHarmony's uname answers "OpenHarmony" for -s, which third party configure
 # scripts (OpenSSL, CMake probes) do not recognise as a supported host. Shadow
 # it with a shim that reports Linux and passes every other flag through.
-shim_dir="$CARGO_TARGET_DIR/ohos-tools/uname-shim"
+shim_dir="$CARGO_TARGET_DIR/ohos-tools/shims"
 mkdir -p -- "$shim_dir"
 if [[ ! -x $shim_dir/uname ]]; then
     real_uname=$(PATH=/system/bin:/usr/bin:/bin command -v uname || true)
@@ -89,6 +89,29 @@ exec "$real_uname" "\$@"
 EOF
         chmod +x -- "$shim_dir/uname"
     fi
+fi
+# Harmonybrew publishes liblzma and libbz2 as shared libraries, so the
+# pkg-config probes in lzma-sys and bzip2-sys link them dynamically and the
+# resulting CLI carries NEEDED entries that ohos/package.py refuses to bundle.
+# Hide just those two packages so both crates fall back to their bundled static
+# sources, and forward every other probe to the real pkg-config.
+if [[ ! -x $shim_dir/pkg-config ]]; then
+    real_pkg_config=$(command -v pkg-config || command -v pkgconf || true)
+    if [[ -n $real_pkg_config ]]; then
+        cat > "$shim_dir/pkg-config" <<EOF
+#!/system/bin/sh
+for arg in "\$@"; do
+    case \$arg in
+        bzip2 | liblzma) exit 1 ;;
+    esac
+done
+exec "$real_pkg_config" "\$@"
+EOF
+        chmod +x -- "$shim_dir/pkg-config"
+    fi
+fi
+if [[ -x $shim_dir/pkg-config ]]; then
+    export PKG_CONFIG="$shim_dir/pkg-config"
 fi
 export PATH="$shim_dir:$PATH"
 # Name the compilers explicitly: Harmonybrew exposes the OHOS clang under
