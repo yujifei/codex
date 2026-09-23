@@ -134,8 +134,7 @@ extensions must also permit execution. An ordinary `uid=2000(shell)` HDC session
 may refuse even signed files with exit 126; copying a file is not proof it runs.
 Use the user's Docs directory and an authorized terminal for persistent use;
 `/data/local/tmp` is only a development transfer location.
-The linked SDK is OpenHarmony 6.0.0.47 (API 20), matching the existing WSL
-browser build's `clang_base_path`. The executable needs the device's `libc.so`
+The linked SDK is OpenHarmony 6.0.0.47 (API 20). The executable needs the device's `libc.so`
 and `libtime_service_ndk.so`; do not copy the SDK link stubs to the device.
 The time service API was introduced in API 12, but compatibility of the entire
 binary with older SDK/system versions has not been established.
@@ -202,12 +201,16 @@ archive from the crate's own V8 sources instead:
 
 ```sh
 export OHOS_SDK_NATIVE=/path/to/openharmony/native
-export OHOS_REF_TREE=/path/to/ohos-adapted-chromium/src   # supplies gn toolchain + icudtl.dat
+export V8_ICU_DATA=/path/to/icudtl.dat   # data matching the crate's ICU version
 bash ohos/build-v8.sh
 RUSTY_V8_ARCHIVE=$HOME/codex-ohos-v8/librusty_v8.a \
 RUSTY_V8_SRC_BINDING_PATH=$HOME/codex-ohos-v8/gen/src_binding_ptrcomp_sandbox_release_aarch64-unknown-linux-ohos.rs \
   bash ohos/build.sh build release
 ```
+
+The build uses a standalone OpenHarmony native SDK and an ICU data file matching
+the ICU sources in the `v8` crate. The GN toolchain is included in this repository's
+patch; no external browser source checkout is required.
 
 `build-v8.sh` applies `ohos/v8/v8-ohos-source.patch` (OpenHarmony ifdefs plus an
 OHOS gn toolchain) to a copy of the `v8-150.4.0` crate, cross-compiles

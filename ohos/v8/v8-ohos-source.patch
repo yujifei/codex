@@ -569,7 +569,7 @@ diff -ruN a/build/config/ohos/abi.gni b/build/config/ohos/abi.gni
 diff -ruN a/build/config/ohos/config.gni b/build/config/ohos/config.gni
 --- a/build/config/ohos/config.gni	1970-01-01 08:00:00.000000000 +0800
 +++ b/build/config/ohos/config.gni	2026-09-22 10:53:32.307702785 +0800
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,64 @@
 +# Copyright 2024 The Huawei Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -578,7 +578,6 @@ diff -ruN a/build/config/ohos/config.gni b/build/config/ohos/config.gni
 +  import("//build/config/dcheck_always_on.gni")
 +  import("//build_overrides/build.gni")
 +  import("abi.gni")
-+  import("//ohos_sdk/ohos_sdk.gni")
 +  import("//build/toolchain/toolchain.gni")
 +
 +  declare_args() {
@@ -629,8 +628,8 @@ diff -ruN a/build/config/ohos/config.gni b/build/config/ohos/config.gni
 +   # config dependent paths
 +    if (use_musl) {
 +      ohos_sdk_root = "//ohos_sdk"
-+      ohos_sysroot = "$ohos_sdk_root/native/$ohos_sdk_version/sysroot/"
-+      ohos_toolchain_root = "$ohos_sdk_root/native/$ohos_sdk_version/llvm/"
++      ohos_sysroot = "$ohos_sdk_root/sysroot/"
++      ohos_toolchain_root = "$ohos_sdk_root/llvm/"
 +  } else {
 +    assert(false, "Unsupport Non-musl target!")
 +  }

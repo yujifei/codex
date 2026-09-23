@@ -5,12 +5,12 @@
 # rusty_v8 publishes no prebuilt archive for this target, so the V8 15.0
 # sources shipped inside the `v8` crate are patched for OpenHarmony (see
 # ohos/v8/v8-ohos-source.patch) and compiled with the OHOS SDK clang through gn
-# + ninja. The OHOS gn toolchain and the musl/libc++ layout come from a
-# Chromium tree that already targets OpenHarmony.
+# + ninja. The OHOS gn toolchain is included in the patch, and the SDK is
+# supplied independently of any browser source checkout.
 #
 # Required environment:
 #   OHOS_SDK_NATIVE   SDK native dir (…/openharmony/native)
-#   OHOS_REF_TREE     Chromium secondary-development tree with OHOS support
+#   V8_ICU_DATA       icudtl.dat matching the ICU sources in the v8 crate
 # Optional environment (defaults shown):
 #   V8_CRATE_SRC      pristine v8-150.4.0 crate source (cargo registry)
 #   V8_WORK           $HOME/codex-ohos-v8/ws   patched working copy
@@ -21,7 +21,16 @@
 set -euo pipefail
 
 : "${OHOS_SDK_NATIVE:?Set OHOS_SDK_NATIVE to the SDK native directory}"
-: "${OHOS_REF_TREE:?Set OHOS_REF_TREE to an OHOS-adapted Chromium tree}"
+: "${V8_ICU_DATA:?Set V8_ICU_DATA to an ICU data file matching the v8 crate}"
+OHOS_SDK_NATIVE=$(cd -- "$OHOS_SDK_NATIVE" && pwd)
+if [[ ! -x $OHOS_SDK_NATIVE/llvm/bin/clang || ! -d $OHOS_SDK_NATIVE/sysroot ]]; then
+    echo "Invalid OpenHarmony native SDK: $OHOS_SDK_NATIVE" >&2
+    exit 2
+fi
+if [[ ! -f $V8_ICU_DATA || ! -r $V8_ICU_DATA ]]; then
+    echo "ICU data file is not readable: $V8_ICU_DATA" >&2
+    exit 2
+fi
 V8_CRATE_SRC=${V8_CRATE_SRC:-"$HOME/codex-ohos-tools/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/v8-150.4.0"}
 V8_WORK=${V8_WORK:-"$HOME/codex-ohos-v8/ws"}
 V8_OUT=${V8_OUT:-"$HOME/codex-ohos-v8"}
@@ -43,18 +52,18 @@ fi
 (cd -- "$V8_WORK" && patch -p1 --forward < "$here/v8/v8-ohos-source.patch") || true
 
 # 2. Point gn at the OHOS SDK and the host Rust toolchain; the crate tarball
-#    omits the ICU data blob, so take it from the reference Chromium tree.
-ln -sfn -- "$OHOS_REF_TREE/ohos_sdk" "$V8_WORK/ohos_sdk"
+#    omits the ICU data blob, so supply a matching standalone data file.
+ln -sfn -- "$OHOS_SDK_NATIVE" "$V8_WORK/ohos_sdk"
 ln -sfn -- "$RUST_SYSROOT" "$V8_WORK/third_party/rust-toolchain"
 mkdir -p -- "$V8_WORK/third_party/icu/common"
-cp -n -- "$OHOS_REF_TREE/third_party/icu/common/icudtl.dat" \
+cp -- "$V8_ICU_DATA" \
     "$V8_WORK/third_party/icu/common/icudtl.dat"
 cd -- "$V8_WORK"
 
 # 3. Configure. These args mirror what rusty_v8's build.rs emits for
 #    `default + v8_enable_sandbox` in release, minus the features whose sources
 #    the published crate tarball does not ship (temporal, partition_alloc).
-gn gen out/ohos --args="target_os=\"ohos\" target_cpu=\"arm64\" is_debug=false is_clang=true use_musl=true use_sysroot=false use_custom_libcxx=true clang_base_path=\"//ohos_sdk/openharmony/native/llvm\" clang_version=\"22\" treat_warnings_as_errors=false v8_enable_sandbox=true v8_enable_external_code_space=true v8_enable_pointer_compression=true v8_enable_v8_checks=false v8_enable_temporal_support=false v8_enable_partition_alloc=false rusty_v8_enable_simdutf=false use_glib=false rust_sysroot_absolute=\"$RUST_SYSROOT\" rust_bindgen_root=\"$BINDGEN_ROOT\""
+gn gen out/ohos --args="target_os=\"ohos\" target_cpu=\"arm64\" is_debug=false is_clang=true use_musl=true use_sysroot=false use_custom_libcxx=true clang_base_path=\"//ohos_sdk/llvm\" clang_version=\"22\" treat_warnings_as_errors=false v8_enable_sandbox=true v8_enable_external_code_space=true v8_enable_pointer_compression=true v8_enable_v8_checks=false v8_enable_temporal_support=false v8_enable_partition_alloc=false rusty_v8_enable_simdutf=false use_glib=false rust_sysroot_absolute=\"$RUST_SYSROOT\" rust_bindgen_root=\"$BINDGEN_ROOT\""
 
 # 4. Build the monolith: binding.o + all of V8 + static libc++.
 ninja -C out/ohos rusty_v8

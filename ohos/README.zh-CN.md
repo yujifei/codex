@@ -10,19 +10,16 @@
 已在正式系统设备上验证原生二进制可启动运行；命令沙箱受平台 seccomp
 策略限制不可用，需以非沙箱模式运行（见「设备部署和验证」）。
 
-## 参考工程与 SDK
+## SDK
 
-已读取你提供的 `~/external-ohos-144/src/external` 工程、
-`ohos/external/tools/linux_local_debug_hap.sh` 和
-`~/external-ohos-144/src/out/externalReleaseArm64/args.gn`。
-使用与该浏览器原生构建相同的 SDK：
+使用独立安装的 OpenHarmony 原生 SDK，按实际安装位置设置路径：
 
 ```sh
-export OHOS_SDK_NATIVE=/home/yujihui/external-ohos-144/src/ohos_sdk/openharmony/native
+export OHOS_SDK_NATIVE=/path/to/openharmony/native
 ```
 
 SDK 版本为 6.0.0.47 / API 20，目标为 `aarch64-unknown-linux-ohos`。
-CLI 通过 Cargo 编译，不需要触发 Chromium/HAP 的完整构建。
+CLI 通过 Cargo 编译。
 程序依赖设备系统提供的 `libc.so` 和 `libtime_service_ndk.so`。
 SDK 中的同名文件是链接桩，不能作为运行库复制到设备。
 
@@ -36,7 +33,7 @@ export CARGO_TARGET_DIR=/home/yujihui/codex-ohos-target
 cd /mnt/d/AlProject/codex-ohos
 export OHOS_LIBCAP_WORK_DIR=/home/yujihui/codex-ohos-tools/libcap-build
 CARGO_TARGET_DIR=/home/yujihui/codex-ohos-bwrap-target bash ohos/build-bwrap.sh
-export BINARY_SIGN_TOOL=/home/yujihui/external-ohos-144/src/buildtools/HarmonyOS/command-line-tools/sdk/default/openharmony/toolchains/lib/binary-sign-tool
+export BINARY_SIGN_TOOL=/path/to/openharmony/toolchains/lib/binary-sign-tool
 export BWRAP_BINARY=/home/yujihui/codex-ohos-bwrap-target/aarch64-unknown-linux-ohos/release/bwrap.signed
 "$BINARY_SIGN_TOOL" sign -selfSign 1 \
   -inFile "${BWRAP_BINARY%.signed}" -outFile "$BWRAP_BINARY"
@@ -174,12 +171,14 @@ namespace 之前就因 "Unexpected capabilities but not setuid" 中止。两者�
 工具链），用 gn + ninja 交叉编译出 `librusty_v8.a`，并重新生成 crate 未随附的
 指针压缩 + sandbox bindgen 绑定。设置 `RUSTY_V8_ARCHIVE` 与
 `RUSTY_V8_SRC_BINDING_PATH` 后，`ohos/build.sh` 会额外编译
-`codex-code-mode-host`；打包时用 `--code-mode-host` 一并装入。详见
+`codex-code-mode-host`；打包时用 `--code-mode-host` 一并装入。
+构建前需设置 `OHOS_SDK_NATIVE` 和 `V8_ICU_DATA`，分别指向独立 SDK
+和与 crate 内 ICU 版本匹配的 `icudtl.dat` 数据文件。详见
 [英文说明](README.md)。
 
 语音 host 和图形剪贴板仍不在最小 CLI 内。
 Git、rg 及 MCP 服务所需运行时需设备另行提供。
-现有 Windows CLI 和浏览器工程没有被此移植替换。
+现有 Windows CLI 没有被此移植替换。
 
 ## 验证记录
 
